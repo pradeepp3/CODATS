@@ -10,8 +10,76 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+// Import database connection and routes
+const connectDB = require('./config/db');
+const authRoutes = require('./routes/auth');
+const auth = require('./middleware/auth');
+
 const { scanCode, detectLanguage } = require('./scanner');
 const { getAIAnalysis } = require('./ai/gemini');
+
+/**
+ * Apply basic security fixes to code
+ * @param {string} code - Original code
+ * @param {Object} vulnerability - Vulnerability object
+ * @returns {string} - Fixed code
+ */
+function applyBasicFix(code, vulnerability) {
+  let fixedCode = code;
+
+  try {
+    switch (vulnerability.type) {
+      case 'SQL Injection':
+        // Replace basic SQL injection patterns
+        fixedCode = fixedCode.replace(
+          /["']\s*\+\s*[\w.]+\s*\+\s*["']/g,
+          '? /* Use parameterized query */'
+        );
+        break;
+
+      case 'XSS (Cross-Site Scripting)':
+        // Replace innerHTML with textContent
+        fixedCode = fixedCode.replace(
+          /\.innerHTML\s*=\s*([^;]+)/g,
+          '.textContent = $1 /* Safer than innerHTML */'
+        );
+        break;
+
+      case 'Hardcoded Credentials':
+        // Replace hardcoded passwords/keys
+        fixedCode = fixedCode.replace(
+          /(password|key|secret|token)\s*[:=]\s*["'][^"']+["']/gi,
+          '$1: process.env.YOUR_$1_HERE /* Use environment variables */'
+        );
+        break;
+
+      case 'Command Injection':
+        // Add warning comment for command injection
+        fixedCode = fixedCode.replace(
+          /(exec|spawn|system)\s*\(/g,
+          '$1( /* WARNING: Validate and sanitize inputs */ '
+        );
+        break;
+
+      default:
+        // Add a comment indicating the security issue
+        const lines = fixedCode.split('\n');
+        if (vulnerability.line && vulnerability.line <= lines.length) {
+          lines[vulnerability.line - 1] = `// SECURITY: ${vulnerability.description}\n${lines[vulnerability.line - 1]}`;
+          fixedCode = lines.join('\n');
+        }
+        break;
+    }
+  } catch (error) {
+    console.error('Error applying fix:', error);
+    return code; // Return original code if fix fails
+  }
+
+  return fixedCode;
+}
+
+// Connect to database
+connectDB();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -20,6 +88,9 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Routes
+app.use('/auth', authRoutes);
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -72,7 +143,7 @@ app.get('/api/health', (req, res) => {
  * POST /api/scan
  * Body: { code: "...", language: "js" }
  */
-app.post('/api/scan', async (req, res) => {
+app.post('/api/scan', auth, async (req, res) => {
   try {
     const { code, language = 'javascript' } = req.body;
 
@@ -128,7 +199,7 @@ app.post('/api/scan', async (req, res) => {
  * POST /api/scan/upload
  * Body: multipart/form-data with 'file' field
  */
-app.post('/api/scan/upload', upload.single('file'), async (req, res) => {
+app.post('/api/scan/upload', auth, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -194,36 +265,30 @@ app.post('/api/scan/upload', upload.single('file'), async (req, res) => {
  * POST /api/fix
  * Body: { vulnerability: {...}, code: "..." }
  */
-app.post('/api/fix', async (req, res) => {
+app.post('/api/fix', auth, async (req, res) => {
   try {
     const { vulnerability, code } = req.body;
 
-    if (!vulnerability) {
+    if (!vulnerability || !code) {
       return res.status(400).json({
         success: false,
-        error: 'Vulnerability details are required'
+        error: 'Vulnerability details and code are required'
       });
     }
 
-    // Get AI analysis for this specific vulnerability
-    const aiAnalysis = await getAIAnalysis([vulnerability], code || '');
+    // Generate a fixed version of the code
+    const fixedCode = applyBasicFix(code, vulnerability);
 
-    if (aiAnalysis.length > 0) {
-      res.json({
-        success: true,
-        fix: aiAnalysis[0]
-      });
-    } else {
-      res.json({
-        success: true,
-        fix: {
-          vulnerabilityId: vulnerability.id,
-          explanation: vulnerability.description,
-          fix: vulnerability.fix,
-          confidence: 0.7
-        }
-      });
-    }
+    res.json({
+      success: true,
+      fixedCode: fixedCode,
+      fix: {
+        vulnerabilityId: vulnerability.id,
+        explanation: vulnerability.description,
+        fix: vulnerability.fix,
+        confidence: 0.8
+      }
+    });
   } catch (error) {
     console.error('Fix generation error:', error);
     res.status(500).json({

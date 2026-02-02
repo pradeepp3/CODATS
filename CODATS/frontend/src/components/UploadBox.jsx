@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Upload, File, X, AlertCircle } from 'lucide-react';
+import { Upload, File, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 const UploadBox = ({ onFileUpload, isLoading }) => {
   const [dragActive, setDragActive] = useState(false);
@@ -81,111 +81,139 @@ const UploadBox = ({ onFileUpload, isLoading }) => {
   };
 
   return (
-    <div className="bg-dark-800 rounded-xl border border-dark-700 p-4">
-      <div className="flex items-center gap-2 mb-4">
-        <Upload className="w-5 h-5 text-primary-400" />
-        <h3 className="text-lg font-semibold text-white">Upload File</h3>
-      </div>
-
-      {/* Drop Zone */}
-      <div
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleDrop}
-        className={`
-          relative border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer
-          ${dragActive 
-            ? 'border-primary-500 bg-primary-500/10' 
-            : 'border-dark-600 hover:border-dark-500 bg-dark-900/50'
-          }
-        `}
-      >
-        <input
-          type="file"
-          accept={allowedExtensions.join(',')}
-          onChange={handleChange}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-          disabled={isLoading}
-        />
-        
-        <div className="flex flex-col items-center gap-3">
-          <div className={`
-            p-3 rounded-full transition-colors
-            ${dragActive ? 'bg-primary-500/20 text-primary-400' : 'bg-dark-700 text-dark-400'}
-          `}>
-            <Upload className="w-6 h-6" />
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="card-header">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-indigo-500/20 rounded-lg">
+            <Upload className="w-5 h-5 text-indigo-400" />
           </div>
-          
           <div>
-            <p className="text-dark-200 font-medium">
-              {dragActive ? 'Drop file here' : 'Drag & drop or click to upload'}
-            </p>
-            <p className="text-dark-500 text-sm mt-1">
-              Supported: {allowedExtensions.join(', ')}
-            </p>
+            <h3 className="text-lg font-semibold text-slate-200">Upload File</h3>
+            <p className="text-sm text-slate-400">Drag & drop or click to select</p>
           </div>
         </div>
       </div>
 
-      {/* Error Message */}
-      {error && (
-        <div className="flex items-center gap-2 mt-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-          <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
-          <p className="text-red-400 text-sm">{error}</p>
-        </div>
-      )}
+      {/* Content */}
+      <div className="card-content flex-1 flex flex-col">
+        {/* Drop Zone */}
+        <div
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+          className={`
+            relative border-2 border-dashed rounded-xl flex-1 flex items-center justify-center text-center transition-all cursor-pointer min-h-[280px]
+            ${dragActive 
+              ? 'border-indigo-400 bg-indigo-500/10' 
+              : 'border-slate-600 hover:border-slate-500 bg-slate-700/30'
+            }
+          `}
+        >
+          <input
+            type="file"
+            accept={allowedExtensions.join(',')}
+            onChange={handleChange}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            disabled={isLoading}
+          />
+          
+          <div className="flex flex-col items-center gap-6">
+            <div className={`
+              p-4 rounded-full transition-all
+              ${dragActive 
+                ? 'bg-indigo-500/20 text-indigo-400 scale-110' 
+                : 'bg-slate-600/50 text-slate-400'
+              }
+            `}>
+              <Upload className="w-10 h-10" />
+            </div>
+            
+            <div className="space-y-2">
+              <p className="text-lg font-medium text-slate-200">
+                {dragActive ? 'Drop your file here' : 'Upload your code file'}
+              </p>
+              <p className="text-sm text-slate-400">
+                Supports: .js, .jsx, .ts, .tsx, .py, .java, .php, .go, .rb, .c, .cpp, .cs
+              </p>
+              <p className="text-xs text-slate-500">
+                Maximum file size: 10MB
+              </p>
+            </div>
 
-      {/* Selected File */}
-      {selectedFile && !error && (
-        <div className="mt-4 p-3 bg-dark-700/50 rounded-lg border border-dark-600">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-primary-500/20 rounded-lg">
-                <File className="w-5 h-5 text-primary-400" />
+            {!dragActive && (
+              <div className="flex items-center gap-2 text-sm text-slate-400">
+                <span>or</span>
+                <button className="text-indigo-400 hover:text-indigo-300 font-medium">
+                  click to browse
+                </button>
               </div>
-              <div>
-                <p className="text-dark-200 font-medium text-sm truncate max-w-[200px]">
-                  {selectedFile.name}
-                </p>
-                <p className="text-dark-500 text-xs">
-                  {formatFileSize(selectedFile.size)}
-                </p>
+            )}
+          </div>
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="mt-4 flex items-start gap-3 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-red-400">Upload Error</p>
+              <p className="text-sm text-red-300 mt-1">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Selected File */}
+        {selectedFile && !error && (
+          <div className="mt-6 p-4 bg-slate-700 border border-slate-600 rounded-lg">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-green-500/20 rounded-lg">
+                  <File className="w-5 h-5 text-green-400" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-slate-200 truncate">
+                    {selectedFile.name}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {formatFileSize(selectedFile.size)}
+                  </p>
+                </div>
               </div>
+              
+              <button
+                onClick={clearSelection}
+                className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-600 rounded-lg transition-colors"
+                title="Remove file"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
             
             <button
-              onClick={clearSelection}
-              className="p-1.5 text-dark-400 hover:text-dark-200 hover:bg-dark-600 rounded-lg transition-colors"
+              onClick={handleUpload}
+              disabled={isLoading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
-              <X className="w-4 h-4" />
+              {isLoading ? (
+                <>
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span>Processing...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Load File</span>
+                </>
+              )}
             </button>
           </div>
-          
-          <button
-            onClick={handleUpload}
-            disabled={isLoading}
-            className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-primary-600 to-primary-500 text-white rounded-lg font-medium text-sm hover:from-primary-500 hover:to-primary-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-          >
-            {isLoading ? (
-              <>
-                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Scanning...
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                </svg>
-                Scan File
-              </>
-            )}
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

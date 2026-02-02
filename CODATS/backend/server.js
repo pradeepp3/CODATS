@@ -441,13 +441,14 @@ app.use((req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const HOST = process.env.HOST || '127.0.0.1';
+app.listen(PORT, HOST, () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
 ║     CODATS - Code Analysis & Threat Scanning System       ║
 ║                                                           ║
-║     Server running on http://localhost:${PORT}              ║
+║     Server running on http://${HOST}:${PORT}              ║
 ║                                                           ║
 ║     Endpoints:                                            ║
 ║     • POST /api/scan        - Scan code                   ║

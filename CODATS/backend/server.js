@@ -28,48 +28,114 @@ function applyBasicFix(code, vulnerability) {
   let fixedCode = code;
 
   try {
+    // Get the vulnerable line if available
+    const lines = code.split('\n');
+    const vulnLineNumber = vulnerability.line;
+    const vulnLine = vulnLineNumber ? lines[vulnLineNumber - 1] : '';
+
     switch (vulnerability.type) {
       case 'SQL Injection':
-        // Replace basic SQL injection patterns
-        fixedCode = fixedCode.replace(
-          /["']\s*\+\s*[\w.]+\s*\+\s*["']/g,
-          '? /* Use parameterized query */'
-        );
+        // Target the specific vulnerable line
+        if (vulnLine && vulnLineNumber) {
+          let fixedLine = vulnLine;
+          
+          // Fix template literal injections
+          fixedLine = fixedLine.replace(/`([^`]*)\$\{([^}]+)\}([^`]*)`/g, 
+            '`$1?$3` /* FIXED: Use parameterized query instead of ${$2} */');
+          
+          // Fix string concatenation
+          fixedLine = fixedLine.replace(/(["'])([^"']*)\1\s*\+\s*([^+;]+)\s*\+\s*(["'])([^"']*)\4/g,
+            '$1$2?$5$4 /* FIXED: Use parameterized query instead of concatenation */');
+          
+          // Fix f-string injections (Python)
+          fixedLine = fixedLine.replace(/f["']([^"']*)\{([^}]+)\}([^"']*)/g,
+            '"$1%s$3", $2 /* FIXED: Use parameterized query */');
+
+          lines[vulnLineNumber - 1] = fixedLine;
+          fixedCode = lines.join('\n');
+        }
         break;
 
-      case 'XSS (Cross-Site Scripting)':
-        // Replace innerHTML with textContent
-        fixedCode = fixedCode.replace(
-          /\.innerHTML\s*=\s*([^;]+)/g,
-          '.textContent = $1 /* Safer than innerHTML */'
-        );
+      case 'Cross-Site Scripting (XSS)':
+        if (vulnLine && vulnLineNumber) {
+          let fixedLine = vulnLine;
+          
+          // Fix innerHTML assignments
+          fixedLine = fixedLine.replace(/\.innerHTML\s*=\s*([^;]+)/g, 
+            '.textContent = $1 /* FIXED: Use textContent to prevent XSS */');
+          
+          // Fix document.write
+          fixedLine = fixedLine.replace(/document\.write\s*\(([^)]+)\)/g,
+            '/* FIXED: document.write removed - use DOM methods instead */\n// document.createTextNode($1)');
+          
+          // Fix outerHTML
+          fixedLine = fixedLine.replace(/\.outerHTML\s*=\s*([^;]+)/g,
+            '/* FIXED: outerHTML replaced */ .replaceWith(document.createTextNode($1))');
+          
+          // Fix insertAdjacentHTML
+          fixedLine = fixedLine.replace(/\.insertAdjacentHTML\s*\(([^,]+),\s*([^)]+)\)/g,
+            '.insertAdjacentText($1, $2) /* FIXED: Use insertAdjacentText */');
+
+          lines[vulnLineNumber - 1] = fixedLine;
+          fixedCode = lines.join('\n');
+        }
         break;
 
       case 'Hardcoded Credentials':
-        // Replace hardcoded passwords/keys
-        fixedCode = fixedCode.replace(
-          /(password|key|secret|token)\s*[:=]\s*["'][^"']+["']/gi,
-          '$1: process.env.YOUR_$1_HERE /* Use environment variables */'
-        );
+        if (vulnLine && vulnLineNumber) {
+          let fixedLine = vulnLine;
+          
+          // Fix hardcoded passwords/keys
+          fixedLine = fixedLine.replace(
+            /(password|passwd|pwd|secret|api_?key|apikey|auth_?token|access_?token|private_?key)\s*[:=]\s*["'][^"']+["']/gi,
+            '$1: process.env.$1.toUpperCase() || "YOUR_$1_HERE" /* FIXED: Use environment variable */'
+          );
+          
+          // Fix hardcoded tokens
+          fixedLine = fixedLine.replace(
+            /(Bearer|Basic)\s+[A-Za-z0-9+/=]{20,}/gi,
+            '$1 " + process.env.AUTH_TOKEN /* FIXED: Use environment variable */'
+          );
+          
+          // Fix MongoDB connection strings
+          fixedLine = fixedLine.replace(
+            /mongodb(\+srv)?:\/\/([^:]+):([^@]+)@/gi,
+            'mongodb$1://" + process.env.DB_USER + ":" + process.env.DB_PASSWORD + "@'
+          );
+
+          lines[vulnLineNumber - 1] = fixedLine;
+          fixedCode = lines.join('\n');
+        }
         break;
 
       case 'Command Injection':
-        // Add warning comment for command injection
-        fixedCode = fixedCode.replace(
-          /(exec|spawn|system)\s*\(/g,
-          '$1( /* WARNING: Validate and sanitize inputs */ '
-        );
+        if (vulnLine && vulnLineNumber) {
+          let fixedLine = vulnLine;
+          
+          // Add input validation before command execution
+          const indent = vulnLine.match(/^\s*/)[0];
+          const validationComment = `${indent}// FIXED: Add input validation before command execution\n${indent}if (!isValidInput(userInput)) throw new Error('Invalid input');\n`;
+          
+          lines[vulnLineNumber - 1] = validationComment + vulnLine;
+          fixedCode = lines.join('\n');
+        }
         break;
 
       default:
-        // Add a comment indicating the security issue
-        const lines = fixedCode.split('\n');
-        if (vulnerability.line && vulnerability.line <= lines.length) {
-          lines[vulnerability.line - 1] = `// SECURITY: ${vulnerability.description}\n${lines[vulnerability.line - 1]}`;
+        // For other vulnerability types, add a security comment
+        if (vulnLine && vulnLineNumber) {
+          const indent = vulnLine.match(/^\s*/)[0];
+          lines[vulnLineNumber - 1] = `${indent}// SECURITY WARNING: ${vulnerability.description}\n${vulnLine}`;
           fixedCode = lines.join('\n');
         }
         break;
     }
+    
+    // Add a header comment to indicate the fix was applied
+    if (fixedCode !== code) {
+      fixedCode = `// CODATS AUTO-FIX APPLIED: ${vulnerability.type} vulnerability fixed\n${fixedCode}`;
+    }
+
   } catch (error) {
     console.error('Error applying fix:', error);
     return code; // Return original code if fix fails

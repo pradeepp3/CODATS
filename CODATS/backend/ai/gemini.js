@@ -11,25 +11,21 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 /**
- * Generate AI analysis for vulnerabilities using Gemini API
- * @param {Array} vulnerabilities - Array of detected vulnerabilities
- * @param {string} code - Original source code
- * @returns {Array} - AI analysis for each vulnerability
+ * Sleep utility for rate limiting
+ * @param {number} ms - Milliseconds to sleep
  */
-const analyzeWithGemini = async (vulnerabilities, code) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  
-  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-    console.log('Gemini API key not configured, using fallback analysis');
-    return generateFallbackAnalysis(vulnerabilities);
-  }
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const analyses = [];
-
-  for (const vuln of vulnerabilities) {
+/**
+ * Make a single Gemini API call with retry logic
+ * @param {string} apiKey - API key
+ * @param {string} prompt - Prompt to send
+ * @param {number} retries - Number of retries remaining
+ * @returns {string|null} - AI response text or null
+ */
+const callGeminiWithRetry = async (apiKey, prompt, retries = 3) => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const prompt = createAnalysisPrompt(vuln, code);
-      
       const response = await axios.post(
         `${GEMINI_API_URL}?key=${apiKey}`,
         {
@@ -51,7 +47,51 @@ const analyzeWithGemini = async (vulnerabilities, code) => {
         }
       );
 
-      const aiResponse = response.data.candidates?.[0]?.content?.parts?.[0]?.text;
+      return response.data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    } catch (error) {
+      if (error.response?.status === 429 && attempt < retries) {
+        // Rate limited - wait with exponential backoff
+        const waitTime = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s
+        console.log(`Rate limited, waiting ${waitTime/1000}s before retry...`);
+        await sleep(waitTime);
+      } else {
+        throw error;
+      }
+    }
+  }
+  return null;
+};
+
+/**
+ * Generate AI analysis for vulnerabilities using Gemini API
+ * @param {Array} vulnerabilities - Array of detected vulnerabilities
+ * @param {string} code - Original source code
+ * @returns {Array} - AI analysis for each vulnerability
+ */
+const analyzeWithGemini = async (vulnerabilities, code) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  
+  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+    console.log('Gemini API key not configured, using fallback analysis');
+    return generateFallbackAnalysis(vulnerabilities);
+  }
+
+  const analyses = [];
+  
+  // Limit to first 5 vulnerabilities to avoid rate limiting
+  const vulnsToAnalyze = vulnerabilities.slice(0, 5);
+  const skippedCount = vulnerabilities.length - vulnsToAnalyze.length;
+  
+  if (skippedCount > 0) {
+    console.log(`Analyzing first 5 vulnerabilities, ${skippedCount} will use fallback analysis`);
+  }
+
+  for (let i = 0; i < vulnsToAnalyze.length; i++) {
+    const vuln = vulnsToAnalyze[i];
+    try {
+      const prompt = createAnalysisPrompt(vuln, code);
+      
+      const aiResponse = await callGeminiWithRetry(apiKey, prompt);
       
       if (aiResponse) {
         const analysis = parseAIResponse(aiResponse, vuln);
@@ -59,10 +99,20 @@ const analyzeWithGemini = async (vulnerabilities, code) => {
       } else {
         analyses.push(generateFallbackForVuln(vuln));
       }
+      
+      // Add delay between requests to avoid rate limiting (500ms)
+      if (i < vulnsToAnalyze.length - 1) {
+        await sleep(500);
+      }
     } catch (error) {
       console.error(`Gemini API error for vulnerability ${vuln.id}:`, error.message);
       analyses.push(generateFallbackForVuln(vuln));
     }
+  }
+  
+  // Add fallback analysis for skipped vulnerabilities
+  for (let i = vulnsToAnalyze.length; i < vulnerabilities.length; i++) {
+    analyses.push(generateFallbackForVuln(vulnerabilities[i]));
   }
 
   return analyses;
@@ -83,15 +133,24 @@ const analyzeWithGroq = async (vulnerabilities, code) => {
   }
 
   const analyses = [];
+  
+  // Limit to first 5 vulnerabilities to avoid rate limiting
+  const vulnsToAnalyze = vulnerabilities.slice(0, 5);
+  const skippedCount = vulnerabilities.length - vulnsToAnalyze.length;
+  
+  if (skippedCount > 0) {
+    console.log(`Analyzing first 5 vulnerabilities with AI, ${skippedCount} will use fallback analysis`);
+  }
 
-  for (const vuln of vulnerabilities) {
+  for (let i = 0; i < vulnsToAnalyze.length; i++) {
+    const vuln = vulnsToAnalyze[i];
     try {
       const prompt = createAnalysisPrompt(vuln, code);
       
       const response = await axios.post(
         GROQ_API_URL,
         {
-          model: 'llama-3.1-70b-versatile',
+          model: 'llama-3.3-70b-versatile',
           messages: [
             {
               role: 'system',
@@ -122,10 +181,20 @@ const analyzeWithGroq = async (vulnerabilities, code) => {
       } else {
         analyses.push(generateFallbackForVuln(vuln));
       }
+      
+      // Add delay between requests to avoid rate limiting (300ms)
+      if (i < vulnsToAnalyze.length - 1) {
+        await sleep(300);
+      }
     } catch (error) {
-      console.error(`Groq API error for vulnerability ${vuln.id}:`, error.message);
+      console.error(`Groq API error for vulnerability ${vuln.id}:`, error.response?.data?.error?.message || error.message);
       analyses.push(generateFallbackForVuln(vuln));
     }
+  }
+  
+  // Add fallback analysis for skipped vulnerabilities
+  for (let i = vulnsToAnalyze.length; i < vulnerabilities.length; i++) {
+    analyses.push(generateFallbackForVuln(vulnerabilities[i]));
   }
 
   return analyses;

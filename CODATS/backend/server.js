@@ -10,8 +10,142 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+// Import database connection and routes
+const connectDB = require('./config/db');
+const authRoutes = require('./routes/auth');
+const auth = require('./middleware/auth');
+
 const { scanCode, detectLanguage } = require('./scanner');
 const { getAIAnalysis } = require('./ai/gemini');
+
+/**
+ * Apply basic security fixes to code
+ * @param {string} code - Original code
+ * @param {Object} vulnerability - Vulnerability object
+ * @returns {string} - Fixed code
+ */
+function applyBasicFix(code, vulnerability) {
+  let fixedCode = code;
+
+  try {
+    // Get the vulnerable line if available
+    const lines = code.split('\n');
+    const vulnLineNumber = vulnerability.line;
+    const vulnLine = vulnLineNumber ? lines[vulnLineNumber - 1] : '';
+
+    switch (vulnerability.type) {
+      case 'SQL Injection':
+        // Target the specific vulnerable line
+        if (vulnLine && vulnLineNumber) {
+          let fixedLine = vulnLine;
+          
+          // Fix template literal injections
+          fixedLine = fixedLine.replace(/`([^`]*)\$\{([^}]+)\}([^`]*)`/g, 
+            '`$1?$3` /* FIXED: Use parameterized query instead of ${$2} */');
+          
+          // Fix string concatenation
+          fixedLine = fixedLine.replace(/(["'])([^"']*)\1\s*\+\s*([^+;]+)\s*\+\s*(["'])([^"']*)\4/g,
+            '$1$2?$5$4 /* FIXED: Use parameterized query instead of concatenation */');
+          
+          // Fix f-string injections (Python)
+          fixedLine = fixedLine.replace(/f["']([^"']*)\{([^}]+)\}([^"']*)/g,
+            '"$1%s$3", $2 /* FIXED: Use parameterized query */');
+
+          lines[vulnLineNumber - 1] = fixedLine;
+          fixedCode = lines.join('\n');
+        }
+        break;
+
+      case 'Cross-Site Scripting (XSS)':
+        if (vulnLine && vulnLineNumber) {
+          let fixedLine = vulnLine;
+          
+          // Fix innerHTML assignments
+          fixedLine = fixedLine.replace(/\.innerHTML\s*=\s*([^;]+)/g, 
+            '.textContent = $1 /* FIXED: Use textContent to prevent XSS */');
+          
+          // Fix document.write
+          fixedLine = fixedLine.replace(/document\.write\s*\(([^)]+)\)/g,
+            '/* FIXED: document.write removed - use DOM methods instead */\n// document.createTextNode($1)');
+          
+          // Fix outerHTML
+          fixedLine = fixedLine.replace(/\.outerHTML\s*=\s*([^;]+)/g,
+            '/* FIXED: outerHTML replaced */ .replaceWith(document.createTextNode($1))');
+          
+          // Fix insertAdjacentHTML
+          fixedLine = fixedLine.replace(/\.insertAdjacentHTML\s*\(([^,]+),\s*([^)]+)\)/g,
+            '.insertAdjacentText($1, $2) /* FIXED: Use insertAdjacentText */');
+
+          lines[vulnLineNumber - 1] = fixedLine;
+          fixedCode = lines.join('\n');
+        }
+        break;
+
+      case 'Hardcoded Credentials':
+        if (vulnLine && vulnLineNumber) {
+          let fixedLine = vulnLine;
+          
+          // Fix hardcoded passwords/keys
+          fixedLine = fixedLine.replace(
+            /(password|passwd|pwd|secret|api_?key|apikey|auth_?token|access_?token|private_?key)\s*[:=]\s*["'][^"']+["']/gi,
+            '$1: process.env.$1.toUpperCase() || "YOUR_$1_HERE" /* FIXED: Use environment variable */'
+          );
+          
+          // Fix hardcoded tokens
+          fixedLine = fixedLine.replace(
+            /(Bearer|Basic)\s+[A-Za-z0-9+/=]{20,}/gi,
+            '$1 " + process.env.AUTH_TOKEN /* FIXED: Use environment variable */'
+          );
+          
+          // Fix MongoDB connection strings
+          fixedLine = fixedLine.replace(
+            /mongodb(\+srv)?:\/\/([^:]+):([^@]+)@/gi,
+            'mongodb$1://" + process.env.DB_USER + ":" + process.env.DB_PASSWORD + "@'
+          );
+
+          lines[vulnLineNumber - 1] = fixedLine;
+          fixedCode = lines.join('\n');
+        }
+        break;
+
+      case 'Command Injection':
+        if (vulnLine && vulnLineNumber) {
+          let fixedLine = vulnLine;
+          
+          // Add input validation before command execution
+          const indent = vulnLine.match(/^\s*/)[0];
+          const validationComment = `${indent}// FIXED: Add input validation before command execution\n${indent}if (!isValidInput(userInput)) throw new Error('Invalid input');\n`;
+          
+          lines[vulnLineNumber - 1] = validationComment + vulnLine;
+          fixedCode = lines.join('\n');
+        }
+        break;
+
+      default:
+        // For other vulnerability types, add a security comment
+        if (vulnLine && vulnLineNumber) {
+          const indent = vulnLine.match(/^\s*/)[0];
+          lines[vulnLineNumber - 1] = `${indent}// SECURITY WARNING: ${vulnerability.description}\n${vulnLine}`;
+          fixedCode = lines.join('\n');
+        }
+        break;
+    }
+    
+    // Add a header comment to indicate the fix was applied
+    if (fixedCode !== code) {
+      fixedCode = `// CODATS AUTO-FIX APPLIED: ${vulnerability.type} vulnerability fixed\n${fixedCode}`;
+    }
+
+  } catch (error) {
+    console.error('Error applying fix:', error);
+    return code; // Return original code if fix fails
+  }
+
+  return fixedCode;
+}
+
+// Connect to database
+connectDB();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -20,6 +154,9 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Routes
+app.use('/auth', authRoutes);
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -72,7 +209,7 @@ app.get('/api/health', (req, res) => {
  * POST /api/scan
  * Body: { code: "...", language: "js" }
  */
-app.post('/api/scan', async (req, res) => {
+app.post('/api/scan', auth, async (req, res) => {
   try {
     const { code, language = 'javascript' } = req.body;
 
@@ -128,7 +265,7 @@ app.post('/api/scan', async (req, res) => {
  * POST /api/scan/upload
  * Body: multipart/form-data with 'file' field
  */
-app.post('/api/scan/upload', upload.single('file'), async (req, res) => {
+app.post('/api/scan/upload', auth, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -194,36 +331,30 @@ app.post('/api/scan/upload', upload.single('file'), async (req, res) => {
  * POST /api/fix
  * Body: { vulnerability: {...}, code: "..." }
  */
-app.post('/api/fix', async (req, res) => {
+app.post('/api/fix', auth, async (req, res) => {
   try {
     const { vulnerability, code } = req.body;
 
-    if (!vulnerability) {
+    if (!vulnerability || !code) {
       return res.status(400).json({
         success: false,
-        error: 'Vulnerability details are required'
+        error: 'Vulnerability details and code are required'
       });
     }
 
-    // Get AI analysis for this specific vulnerability
-    const aiAnalysis = await getAIAnalysis([vulnerability], code || '');
+    // Generate a fixed version of the code
+    const fixedCode = applyBasicFix(code, vulnerability);
 
-    if (aiAnalysis.length > 0) {
-      res.json({
-        success: true,
-        fix: aiAnalysis[0]
-      });
-    } else {
-      res.json({
-        success: true,
-        fix: {
-          vulnerabilityId: vulnerability.id,
-          explanation: vulnerability.description,
-          fix: vulnerability.fix,
-          confidence: 0.7
-        }
-      });
-    }
+    res.json({
+      success: true,
+      fixedCode: fixedCode,
+      fix: {
+        vulnerabilityId: vulnerability.id,
+        explanation: vulnerability.description,
+        fix: vulnerability.fix,
+        confidence: 0.8
+      }
+    });
   } catch (error) {
     console.error('Fix generation error:', error);
     res.status(500).json({

@@ -355,11 +355,16 @@ console.log('User authenticated:', userId);
  * @returns {Array} - AI analysis results
  */
 const getAIAnalysis = async (vulnerabilities, code) => {
-  const provider = process.env.AI_PROVIDER || 'gemini';
-
   if (vulnerabilities.length === 0) {
     return [];
   }
+
+  // Temporarily using fallback analysis to avoid API issues
+  console.log('Using fallback analysis to avoid API rate limits');
+  return generateFallbackAnalysis(vulnerabilities);
+  
+  /* Commented out to avoid API issues
+  const provider = process.env.AI_PROVIDER || 'gemini';
 
   // Limit to first 10 vulnerabilities to avoid API overload
   const limitedVulns = vulnerabilities.slice(0, 10);
@@ -374,6 +379,7 @@ const getAIAnalysis = async (vulnerabilities, code) => {
     console.error('AI analysis error:', error.message);
     return generateFallbackAnalysis(limitedVulns);
   }
+  */
 };
 
 module.exports = {

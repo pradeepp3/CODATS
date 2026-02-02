@@ -12,13 +12,22 @@ const api = axios.create({
   },
 });
 
+// Add response interceptor for error handling
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    console.error('API Error:', error);
+    return Promise.reject(error);
+  }
+);
+
 /**
  * Scan code for vulnerabilities
  * @param {string} code - Source code to scan
- * @param {string} language - Programming language
+ * @param {string} language - Programming language (optional)
  * @returns {Promise} - Scan results
  */
-export const scanCode = async (code, language = 'javascript') => {
+const scanCode = async (code, language = 'javascript') => {
   try {
     const response = await api.post('/api/scan', { code, language });
     return response.data;
@@ -30,19 +39,20 @@ export const scanCode = async (code, language = 'javascript') => {
 
 /**
  * Upload and scan a file
- * @param {File} file - File to upload
+ * @param {File} file - File to upload and scan
  * @returns {Promise} - Scan results
  */
-export const scanFile = async (file) => {
+const scanFile = async (file) => {
   try {
     const formData = new FormData();
     formData.append('file', file);
     
-    const response = await api.post('/api/scan/upload', formData, {
+    const response = await api.post('/api/scan/file', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     });
+    
     return response.data;
   } catch (error) {
     console.error('File scan error:', error);
@@ -51,61 +61,42 @@ export const scanFile = async (file) => {
 };
 
 /**
- * Get AI fix for a vulnerability
- * @param {Object} vulnerability - Vulnerability details
- * @param {string} code - Source code
- * @returns {Promise} - Fix recommendation
+ * Apply a fix for a vulnerability
+ * @param {string} code - Original code
+ * @param {Object} vulnerability - Vulnerability object
+ * @returns {Promise} - Fixed code
  */
-export const getFix = async (vulnerability, code) => {
+const applyFix = async (code, vulnerability) => {
   try {
-    const response = await api.post('/api/fix', { vulnerability, code });
+    const response = await api.post('/api/fix', { code, vulnerability });
     return response.data;
   } catch (error) {
-    console.error('Get fix error:', error);
-    throw error.response?.data || { error: 'Failed to get fix' };
+    console.error('Apply fix error:', error);
+    throw error.response?.data || { error: 'Failed to apply fix' };
   }
 };
 
 /**
- * Get supported languages
- * @returns {Promise} - List of languages
+ * Get AI-powered fix suggestions
+ * @param {Object} vulnerability - Vulnerability object
+ * @returns {Promise} - Fix suggestions
  */
-export const getLanguages = async () => {
+const getFixSuggestions = async (vulnerability) => {
   try {
-    const response = await api.get('/api/languages');
+    const response = await api.post('/api/suggestions', { vulnerability });
     return response.data;
   } catch (error) {
-    console.error('Get languages error:', error);
-    throw error.response?.data || { error: 'Failed to get languages' };
+    console.error('Get suggestions error:', error);
+    throw error.response?.data || { error: 'Failed to get suggestions' };
   }
 };
 
-/**
- * Get vulnerability rules
- * @returns {Promise} - List of rules
- */
-export const getRules = async () => {
-  try {
-    const response = await api.get('/api/rules');
-    return response.data;
-  } catch (error) {
-    console.error('Get rules error:', error);
-    throw error.response?.data || { error: 'Failed to get rules' };
-  }
+export default {
+  scanCode,
+  scanFile,
+  applyFix,
+  getFixSuggestions,
 };
 
-/**
- * Health check
- * @returns {Promise} - Health status
- */
-export const healthCheck = async () => {
-  try {
-    const response = await api.get('/api/health');
-    return response.data;
-  } catch (error) {
-    console.error('Health check error:', error);
-    throw error.response?.data || { error: 'API is not available' };
-  }
-};
-
-export default api;
+// Named exports for backward compatibility
+export { scanCode, scanFile, applyFix, getFixSuggestions };
